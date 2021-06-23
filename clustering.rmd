@@ -1,0 +1,185 @@
+---
+output:
+  word_document: default
+  html_document: default
+---
+
+
+```{r, include = FALSE}
+#install.packages("factoextra")
+
+library(tidymodels)
+library(tidyverse)
+library(cluster) #algorithms for clustering
+library(factoextra) #visualization
+
+trucks <- read_csv("trucks.csv")
+```
+```{r}
+str(trucks)
+summary(trucks)
+```
+
+```{r}
+ggplot(trucks, aes(Distance, Speeding)) +
+  geom_point(alpha = 0.4) + theme_bw()
+```
+
+Task 1 
+There appears to four clusters and a correlation between distance traveled and speed.
+
+```{r}
+kmeans_recipe = recipe(~ Distance + Speeding, trucks) 
+
+trucks2 = kmeans_recipe %>% 
+  step_scale(all_numeric()) %>%
+  step_center(all_numeric()) 
+
+trucks2 <- prep(trucks2, trucks)
+
+trucks_cleaned = bake(trucks2, trucks) 
+```
+
+Task 2 
+
+```{r}
+summary(trucks_cleaned)
+summary(trucks)
+```
+
+
+
+```{r}
+set.seed(64)
+kclust = kmeans(trucks_cleaned, centers = 2)
+kclust
+```
+
+```{r}
+
+points <- augment(kclust, trucks) 
+#points = points %>% select(-.cluster)
+points
+```
+
+
+```{r}
+ggplot(points, aes(Distance, Speeding, color = .cluster)) +
+  geom_point(alpha = 0.4) + theme_bw()
+
+```
+
+Task 3
+The kmeans clustings show two loose clusters.  It appeas more refinement may be needed or possibly use the ggplot(clusterings, aes(k, tot.withinss)) command to see if there's a more optimal k value.  
+
+
+
+
+```{r}
+set.seed(412)
+clusts = 
+  tibble(k = 1:8) %>% #try from 1 to 8 clusters
+  mutate(
+    kclust = map(k, ~kmeans(trucks, .x)),
+    tidied = map(kclust, tidy),
+    glanced = map(kclust, glance),
+    augmented = map(kclust, augment, trucks)
+  )
+
+clusts
+```
+
+```{r}
+clusters =
+  clusts %>%
+  unnest(cols = c(tidied))
+
+assignments = 
+  clusts %>% 
+  unnest(cols = c(augmented))
+
+clusterings = 
+  clusts %>%
+  unnest(cols = c(glanced))
+```
+
+```{r}
+p1 = 
+  ggplot(assignments, aes(x = Distance, y = Speeding)) +
+  geom_point(aes(color = .cluster), alpha = 0.8) + 
+  facet_wrap(~ k)
+p1
+```
+
+
+
+```{r}
+ggplot(clusterings, aes(k, tot.withinss)) +
+  geom_line() +
+  geom_point() + theme_bw()
+```
+
+Task 4 
+4 appears to be the best k value
+
+```{r}
+trucks_scaled = scale(trucks) 
+summary(trucks_scaled)
+```
+
+```{r}
+set.seed(2521)
+clusts = 
+  tibble(k = 1:10) %>%
+  mutate(
+    kclust = map(k, ~kmeans(points, .x)),
+    tidied = map(kclust, tidy),
+    glanced = map(kclust, glance),
+    augmented = map(kclust, augment, points)
+  )
+clusts
+```
+
+```{r}
+clusters =
+  clusts %>%
+  unnest(cols = c(tidied))
+
+assignments = 
+  clusts %>% 
+  unnest(cols = c(augmented))
+
+clusterings = 
+  clusts %>%
+  unnest(cols = c(glanced))
+```
+
+```{r}
+ggplot(clusterings, aes(k, tot.withinss)) +
+  geom_line() +
+  geom_point() + theme_bw()
+```
+
+Task 5
+
+3 or 4 clusters appear to be the appropriate k value 
+
+```{r}
+set.seed(64)
+kclust = kmeans(trucks_cleaned, centers = 4)
+kclust 
+```
+
+
+```{r}
+points <- augment(kclust, trucks) 
+points
+```
+
+```{r}
+ggplot(points, aes(Distance, Speeding, color = .cluster)) +
+  geom_point(alpha = 0.4) + theme_bw()
+```
+
+Task 6
+A k value of 4 appears to be more optimal than the previous k value of 2.  The data visualization appears more meaningful to me.  

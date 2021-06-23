@@ -1,0 +1,261 @@
+---
+output:
+  word_document: default
+  html_document: default
+---
+```{r Libraries and Data }
+
+library(tidyverse)
+library(tidymodels)
+library(e1071)
+library(ROCR)
+library(GGally)
+
+parole <- read_csv("parole.csv")
+parole <- parole %>% mutate(male = as_factor(male)) %>%
+  mutate(male = fct_recode(male, "female" = "0", "male" = "1")) %>%
+  mutate(race = as_factor(race)) %>%
+  mutate(race = fct_recode(race, "otherwise" = "2", "white" = "1")) %>%
+  mutate(state = as_factor(state)) %>%
+  mutate(state = fct_recode(state, "Kentucky" = "2", "other" = "1", "Virginia" = "4", "Louisiana" = "3")) %>%
+  mutate(crime = as_factor(crime)) %>%
+  mutate(crime = fct_recode(crime, "larceny" = "2", "other" = "1", "driving related crime" = "4", "drug related crime" = "3")) %>%
+  mutate(multiple.offenses = as_factor(multiple.offenses)) %>%
+  mutate(multiple.offenses = fct_recode(multiple.offenses, "multiple offenses" = "1", "otherwise" = "0")) %>%
+  mutate(violator = as_factor(violator)) %>%
+  mutate(violator = fct_recode(violator, "violated parole" = "1", "parole complete without violation" = "0")) 
+
+
+```
+
+```{r Task 1}
+
+set.seed(12345)
+parole_split <- initial_split(parole, prop = 0.70, strata = violator)
+train <- training(parole_split)
+test <- testing(parole_split)
+
+
+```
+
+```{r Task 2 }
+
+ggplot(parole,aes(x=male,fill = violator)) + geom_bar() + theme_bw()
+
+```
+
+```{r}
+ggplot(parole,aes(x=race,fill = violator)) + geom_bar() + theme_bw()
+```
+
+```{r}
+ggplot(parole,aes(x=multiple.offenses,fill = violator)) + geom_bar() + theme_bw()
+```
+
+```{r}
+ggplot(parole,aes(x=crime,fill = violator)) + geom_bar() + theme_bw()
+```
+
+```{r}
+ggplot(parole,aes(x=state,fill = violator)) + geom_bar() + theme_bw()
+```
+
+```{r  Task 2 continued}
+#modl <- lm(violator ~ age + time.served + max.sentence, parole)
+#modl
+#modl1 <- parole  %>%
+ # dplyr::select(age, time.served, max.sentence)
+#ggpairs(modl1)
+
+```
+```{r}
+t1 <- table(parole$violator, parole$max.sentence)
+prop.table(t1, margin =2)
+t1
+```
+
+
+I visualized several factors with bar graphs and visually identified gender, multiple offenders and state as significant factors in parole violation.  I thought a table based on max sentence length would be insightful; however, no meaningful insight was gained. 
+
+
+```{r Task 3}
+parole_recipe <- recipe(violator ~ multiple.offenses, parole) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+parole_model <-
+  logistic_reg() %>%
+  set_engine("glm")
+
+logreg_wflow <-
+  workflow() %>%
+  add_model(parole_model) %>%
+  add_recipe(parole_recipe)
+
+parole_fit <- fit(logreg_wflow, parole)
+summary(parole_fit$fit$fit$fit)
+
+
+```
+
+As a single variable the module the AIC of 479.81 seems fine.   I consider the model on multiple offenses good as a test I modeled gender and it had a slightly higher AIC. 
+
+
+```{r Task 3 option 2}
+# parole2_recipe <- recipe(violator ~ male, parole) %>%
+#   step_dummy(all_nominal(), -all_outcomes())
+# 
+# parole2_model <-
+#   logistic_reg() %>%
+#   set_engine("glm")
+# 
+# logreg2_wflow <-
+#   workflow() %>%
+#   add_model(parole2_model) %>%
+#   add_recipe(parole2_recipe)
+# 
+# parole2_fit <- fit(logreg2_wflow, parole)
+# summary(parole2_fit$fit$fit$fit)
+```
+
+
+```{r Task 4}
+parolebest_recipe <- recipe(violator ~ multiple.offenses + male + state + crime + time.served, train) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+parolebest_model <-
+  logistic_reg() %>%
+  set_engine("glm")
+
+logregbest_wflow <-
+  workflow() %>%
+  add_model(parolebest_model) %>%
+  add_recipe(parolebest_recipe)
+
+parolebest_fit <- fit(logregbest_wflow, parole)
+summary(parolebest_fit$fit$fit$fit)
+```
+
+The model has an AIC of 376.03.  At the very least the model is better than what I surmised was the best single factor of multiple offenses (AIC 487.17).  Multiple offenses and the states of Louisiana and Virginia are most significant.  I eliminated some factors to include in the model (e.g. race) due to their visual representations in the exploratory phase.  However, I suspected gender (male) especially, crime and time served would be significant model factors but were not so.  The lack of significance of those factors surprised me. 
+
+
+```{r Task 5}
+
+paroleT5_recipe <- recipe(violator ~ multiple.offenses + state + race, train) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+paroleT5_model <-
+  logistic_reg() %>%
+  set_engine("glm")
+
+logregT5_wflow <-
+  workflow() %>%
+  add_model(paroleT5_model) %>%
+  add_recipe(paroleT5_recipe)
+
+paroleT5_fit <- fit(logregT5_wflow, parole)
+summary(paroleT5_fit$fit$fit$fit)
+
+
+```
+
+The AIC dropped and showed improvement over my "best" model!  Multiple offenses and Virginia were the most significant factors.  I am surprises race otherwise had any significance based on the ggplot visualizations. 
+
+
+
+
+```{r Task 6}
+parolee1 <- data.frame(state = "Louisiana", multiple.offenses = "multiple offenses", race = "white")
+parolee2 <- data.frame(state = "Kentucky", multiple.offenses = "otherwise", race = "otherwise")
+predict(paroleT5_fit, parolee1, type ="prob")
+
+```
+
+Parolee1 prediction
+
+```{r}
+predict(paroleT5_fit, parolee2, type ="prob")
+```
+
+Parolee2 prediction
+
+
+```{r Task 7}
+
+predictions = predict(paroleT5_fit, train, type = "prob") [2]
+head(predictions)
+
+```
+
+```{r Task 7.1}
+ROCRpred = prediction(predictions, train$violator)
+ROCRperf = performance(ROCRpred, "tpr", "fpr")
+plot(ROCRperf, colorize = TRUE, print.cutoffs.at=seq(0,1,by=0.1), text.adj=c(-0.2,1.7))
+
+```
+
+
+```{r Task 7.2}
+
+as.numeric(performance(ROCRpred, "auc")@y.values)
+
+```
+
+```{r Task 7.3}
+opt.cut = function(perf, pred){
+  cut.ind = mapply(FUN=function(x, y, p){
+    d = (x-0)^2 + (y-1)^2
+    ind = which(d== min(d))
+    c(sensitivity = y[[ind]], specificity = 1-x[[ind]],
+      cutoff = p[[ind]])
+  }, perf@x.values,perf@y.values, pred@cutoffs)
+}
+print(opt.cut(ROCRperf,ROCRpred))
+```
+
+```{r Task 7.4}
+
+t4 = table(train$violator,predictions>0.1470858)
+t4
+
+```
+
+```{r Task 7.5}
+(t4[1,1]+t4[2,2])/nrow(train)
+
+```
+
+
+Task 8
+Given the cutoff of 0.1470858 the accuracy is 0.8277228, sensitivity is 0.7586207, and specificity is 0.8210291. What are the implications of incorrectly classifying a parolee? The terms of the parolee’s parole may be too lenient. Oversight of a parolee may be less vigilant if a parolee is misclassified as not likely to violate parole.   
+
+```{r Task 9}
+
+t4 = table(train$violator,predictions>0.5)
+t4
+(t4[1,1]+t4[2,2])/nrow(train)
+```
+
+```{r Task 9.1}
+t4 = table(train$violator,predictions>0.625)
+t4
+(t4[1,1]+t4[2,2])/nrow(train)
+```
+
+```{r Task 9.2}
+t4 = table(train$violator,predictions>0.4)
+t4
+(t4[1,1]+t4[2,2])/nrow(train)
+```
+
+
+The probability threshold of >0.625 best maximizes accuracy on the training set.
+
+```{r Task 10}
+predictions = predict(paroleT5_fit, test, type = "prob") [2]
+head(predictions)
+
+t5 = table(test$violator,predictions>0.625)
+t5
+(t5[1,1]+t5[2,2])/nrow(test)
+```
+

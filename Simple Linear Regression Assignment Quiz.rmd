@@ -1,0 +1,76 @@
+---
+output:
+  word_document: default
+  html_document: default
+---
+```{r Task 1 }
+#install.packages("tidymodels")
+#install.packages("GGally")
+#install.packages(lmtest)
+
+library(tidyverse)
+library(tidymodels)
+library(GGally)
+library(lmtest)
+
+air = airquality
+str(airquality)
+```
+There are 153 observations and 6 variables.  There is missing data.   The outcome variable or dependent variable is the "Y" variable in regression analsis and the independent variables are are the "X" variable.  It's my guess Ozone is the "Y" variable.  
+
+```{r Task 2}
+air2 <- drop_na(air)
+```
+
+There are 111 observations of 6 variables.
+
+```{r Task 3 }
+ggpairs(air2)
+
+ggcorr(air2,
+       label = TRUE)
+```
+
+The strongest correlation with the Ozone variable is "Temp" and the least strongly correlated is "Day".
+
+```{r Task 4}
+
+ggplot(air2, aes(x =Temp, y = Ozone))+
+  geom_point()+
+  geom_smooth(method = "lm", color = "red")+
+  theme_bw()
+```
+
+```{r}
+modl <- lm(Ozone ~ Temp, air2)
+summary(modl)
+```
+
+
+
+```{r Task 5}
+ozone_predict = recipe(Ozone ~ Temp, air2)
+ozone_predict
+```
+
+```{r}
+ozone_model <- 
+  linear_reg() %>%
+  set_engine("lm")
+  
+ozone_mflow <-
+  workflow() %>%
+  add_model(ozone_model) %>%
+  add_recipe(ozone_predict)
+  
+ozone_fit <- fit(ozone_mflow, air2)
+
+confint(ozone_fit$fit$fit$fit) 
+```
+
+a. Discuss the
+quality of this model (mention the R square value and significance of the predictor variable). b. Use the code
+below to generate 95% confidence intervals for the coefficients. In what range does the slope coefficient likely
+fall?
+
+

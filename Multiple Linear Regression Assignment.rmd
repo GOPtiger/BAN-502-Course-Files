@@ -1,0 +1,169 @@
+---
+output:
+  word_document: default
+  html_document: default
+editor_options: 
+  chunk_output_type: console
+---
+```{r   Libraries and Data}
+#install.packages("glmnet")
+#install.packages("ggcorrplot")
+
+library(tidyverse)
+library(tidymodels)
+library(glmnet)
+library(GGally)
+library(ggcorrplot)
+library(MASS)
+library(car)
+library(lubridate)
+library(lmtest)
+
+
+bike <- read_csv("bike_cleaned.csv")
+bike <- bike %>% mutate(dteday = mdy(dteday))
+bike <- bike %>% mutate(season = as_factor(season)) %>%
+  mutate(holiday = as_factor(holiday)) %>%
+  mutate(mnth = as_factor(mnth)) %>%
+  mutate(weekday = as_factor(weekday)) %>%
+  mutate(workingday = as_factor(workingday)) %>%
+  mutate(weathersit = as_factor(weathersit)) %>%
+  mutate(hr = as_factor(hr))
+  
+
+```
+
+Why do we convert the “hr” variable into factor? Why not just leave as numbers?  
+
+Hours can be categorical or continuous.  In this case converting "hr" to a factor is needed.  Modeling for occurance at a specific time is advantageous and thus the rationale to treat "hr" as a factor. Applying rules blindly without consideration is problematic in this instance.
+
+
+```{r Task 2}
+modl <- lm(count ~ temp + atemp + hum + windspeed, bike)
+modl1 <- bike  %>%
+  dplyr::select(temp, atemp, hum, windspeed, count)
+ggpairs(modl1)
+summary(modl)
+
+modl2 <- lm(count ~ atemp + hum + windspeed, bike)
+summary(modl2)
+```
+
+According to the regression model atemp, hum and windspeed are significant and atemp, and windspeed have an inttuitive (positive) coefficienct sign. I removed temp from the model to to it's strong correlation to atemp and to judse it's removal from the model.  Removing it had no material effect on Adjusted R-squared but the coeffeceincts changed somewhat.  
+
+
+
+```{r Task 3}
+
+ggplot(bike,aes(x=hr,y=count)) + geom_boxplot() + theme_bw()
+ggplot(bike,aes(x=season,y=count)) + geom_boxplot() + theme_bw()
+ggplot(bike,aes(x=mnth,y=count)) + geom_boxplot() + theme_bw()
+ggplot(bike,aes(x=holiday,y=count)) + geom_boxplot() + theme_bw()
+ggplot(bike,aes(x=weekday,y=count)) + geom_boxplot() + theme_bw()
+ggplot(bike,aes(x=workingday,y=count)) + geom_boxplot() + theme_bw()
+ggplot(bike,aes(x=weathersit,y=count)) + geom_boxplot() + theme_bw()
+
+
+```
+
+Hr - Time of day appears to be a significant factor with increase before and after the traditional workday.
+Season – There appear to correlation with the warm months showing higher counts than cooler months.
+Mnth - Again, warmer months produced higher counts.
+Holiday - There did not seem to be high correlation based on this data point.
+Weekday - The visual representation was surprising to me.  There did not appear to a significant difference based on the day.
+Workingday - There was a marginal increase of the mean on a workingday which, at least to me was surprising.
+Weather - A significant correlation by on Weather was noted.
+
+
+```{r Task 4}
+count_recipe <- recipe(count ~ mnth, bike) %>%
+  step_dummy(mnth)
+
+lm_model <-
+  linear_reg() %>%
+  set_engine("lm")
+
+lm_wflow <-
+  workflow() %>%
+  add_model(lm_model) %>%
+  add_recipe(count_recipe)
+
+lm_fit <- fit(lm_wflow, bike)
+  
+```
+
+```{r}
+summary(lm_fit$fit$fit$fit)
+```
+
+Mnth was chosen as the "best" variable to pursue with a model relative to other good options (seasons, hr, etc.). Season seemed too broad and an "hour" would seem to be impacted based on season, model and weathersit.  For these reasons I settled on month. There appeared to be a significant impact visually between warmer and cooler months.  This corroborated with model with positive coefficients and significant P values.  Clearly with an Adjusted R-squared of .07446 there are other significant contributing elements possible.  Overall I am pleased with the model's quality considering it is based on only one element.
+
+```{r Task 5}
+
+count2_recipe <- recipe(count ~ mnth + hr + season + holiday + weekday + workingday + weathersit + temp + atemp + hum + windspeed, bike) %>%
+  step_dummy(mnth, hr, season, holiday, weekday, workingday, weathersit, temp, atemp, hum, windspeed)
+  step_center(mnth, hr, season, holiday, weekday, workingday, weathersit, temp, atemp, hum, windspeed)
+  #step_scale(all_predictors())
+
+ridge_model <-
+  linear_reg(mixture = 0) %>%
+  set_engine("glmnet")
+
+ridge_wflow <-
+  workflow() %>%
+  add_model(ridge_model) %>%
+  add_recipe(count2_recipe)
+
+ridge_fit <- fit(ridge_wflow, bike)
+```
+
+```{r}
+ridge_fit %>%
+  pull_workflow_fit() %>%
+  pluck("fit")
+```
+
+```{r}
+ridge_fit %>%
+  pull_workflow_fit() %>%
+  pluck("fit") %>%
+  coef(s = 30)
+```
+
+It was definitely an interesting exercise. There appears to be an interaction and multicollinearity issues.  These problems would make sense with overlaps in season, months, temp, etc.  I look forward learning additional technics to address these issues.  I think with some more work a model would be useful to help predict inventory needs or staffing for example.   
+
+```{r}
+count2_recipe <- recipe(count ~ mnth + hr + season + holiday + weekday + workingday + weathersit + temp + atemp + hum + windspeed, bike) %>%
+  step_dummy(all_nominal())
+  step_center(all_predictors(), -hr))
+  step_scale(bike(count, mnth, hr, season,  holiday, weekday, workingday, weathersit, temp, atemp, hum, windspeed))
+
+lasso_model <-
+  linear_reg(mixture = 1) %>%
+  set_engine("glmnet")
+
+lasso_wflow <-
+  workflow() %>%
+  add_model(lasso_model) %>%
+  add_recipe(count2_recipe)
+
+lasso_fit <- fit(lasso_wflow, bike)
+```
+
+```{r}
+lasso_fit %>%
+  pull_workflow_fit() %>%
+  pluck("fit")
+```
+
+```{r}
+lasso_fit %>%
+  pull_workflow_fit() %>%
+  pluck("fit") %>%
+  coef(s = 1.950)
+```
+
+I liked that the Lasso model as it removed elements from the model which weren’t needed.  I surmise I’ll learn additional techniques to test and improve models in the future, I will appreciate that Lasso will give me a potential jump start on feature engineering.
+
+I appreciative to have learned both models it seems Lasso all things being equal will be my go to model for similar uses as the previous exercise.  Lasso model deselects unnecessary elements which I do like.  There also seemed less coefficient fluctuations in Lasso compared to the Ridge model.   Although it should be noted that in this case both Ridge and Lasso model ultimately produced similar results.
+  

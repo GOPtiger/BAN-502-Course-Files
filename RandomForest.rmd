@@ -1,0 +1,247 @@
+---
+output:
+  word_document: default
+  html_document: default
+---
+```{r, include = FALSE}
+
+#install.packages(ranger)
+#install.packages("randomForest")
+#install.packages("titanic")
+#install.packages("gridExtra")
+#install.packages("vip")
+
+library(titanic)
+library(tidyverse)
+library(tidymodels)
+library(mice) #package for imputation
+library(VIM) #visualizing missingness
+library(ranger) #for random forests
+library(randomForest) #also for random forests
+library(caret)
+library(naniar)
+library(GGally)
+library(gridExtra)
+library(vip)
+
+drug <- read_csv("drug_data-1.csv")
+
+names(drug) = c("ID", "Age", "Gender", "Education", "Country", "Ethnicity",
+"Nscore", "Escore", "Oscore", "Ascore", "Cscore", "Impulsive",
+"SS", "Alcohol", "Amphet", "Amyl", "Benzos", "Caff", "Cannabis",
+"Choc", "Coke", "Crack", "Ecstasy", "Heroin", "Ketamine", "Legalh",
+"LSD", "Meth", "Mushrooms", "Nicotine", "Semer", "VSA")
+str(drug)
+
+drug[drug == "CL0"] = "No"
+drug[drug == "CL1"] = "No"
+drug[drug == "CL2"] = "Yes"
+drug[drug == "CL3"] = "Yes"
+drug[drug == "CL4"] = "Yes"
+drug[drug == "CL5"] = "Yes"
+drug[drug == "CL6"] = "Yes"
+
+drug_clean = drug %>% mutate_at(vars(Age:Ethnicity), funs(as_factor)) %>%
+  mutate(Age = factor(Age, labels = c("18_24", "25_34", "35_44","45_54", "55_64", "65_"))) %>%
+  mutate(Gender = factor(Gender, labels = c("Male", "Female"))) %>%
+  mutate(Education = factor(Education, labels =
+                              c("Under16", "At16", "At17", "At18", "SomeCollege", "ProfessionalCert", "Bachelors", "Masters","Doctorate"))) %>%
+  mutate(Country = factor(Country,labels = c("USA", "NewZealand", "Other", "Australia", "Ireland","Canada","UK"))) %>%
+  mutate(Ethnicity = factor(Ethnicity,labels = c("Black", "Asian", "White", "White/Black", "Other","White/Asian", "Black/Asian"))) %>%
+  mutate_at(vars(Alcohol:VSA), funs(as_factor)) %>%
+  select(-ID)
+
+str(drug_clean)
+
+drug_clean = drug_clean %>% select(!(Alcohol:Mushrooms)) %>% select(!(Semer:VSA))
+names(drug_clean)
+```
+
+```{r}
+
+#Task 1
+summary((drug_clean))
+gg_miss_var(drug_clean)
+vim_plot <- aggr(drug_clean, numbers = TRUE, prop = c(TRUE, FALSE),cex.axis=.7)
+
+```
+
+```{r}
+
+#Task 2
+set.seed(1234)
+drug_split <- initial_split(drug_clean, prop = 0.70, strata = Nicotine)
+train <- training(drug_split)
+test <- testing(drug_split)
+
+
+```
+
+```{r}
+#Task 3
+v1 <- ggplot(train, aes(x = Gender, fill = Nicotine)) + geom_bar(position = "fill")
+v2 <- ggplot(train, aes(x = Age, fill = Nicotine)) + geom_bar(position = "fill")
+v3 <- ggplot(train, aes(x = Education, fill = Nicotine)) + geom_bar(position = "fill")
+v4 <- ggplot(train, aes(x = Country, fill = Nicotine)) + geom_bar(position = "fill")
+grid.arrange(v1,v2,v3,v4)
+```
+
+```{r}
+v5 <- ggplot(train, aes(x = Ethnicity, fill = Nicotine)) + geom_bar(position = "fill")
+v6 <- ggplot(train, aes(x = Nscore, fill = Nicotine)) + geom_boxplot()
+v7 <-  ggplot(train, aes(x = Escore, fill = Nicotine)) + geom_boxplot()
+v8 <- ggplot(train, aes(x = Oscore, fill = Nicotine)) + geom_boxplot()
+grid.arrange(v5,v6,v7,v8)
+```
+
+
+```{r}
+v9 <- ggplot(train, aes(x = Ascore, fill = Nicotine)) + geom_boxplot()
+v10 <- ggplot(train, aes(x = Cscore, fill = Nicotine)) + geom_boxplot()
+v11 <- ggplot(train, aes(x = Impulsive, fill = Nicotine)) + geom_boxplot()
+v12 <- ggplot(train, aes(x = SS, fill = Nicotine)) + geom_boxplot()
+grid.arrange(v9,v10,v11,v12)
+```
+
+```{r}
+#Task 4
+
+set.seed(123)
+rf_folds <- vfold_cv(train, v = 5)
+```
+
+```{r}
+nicotine_recipe <- recipe(Nicotine ~., drug_clean) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+rf_model <- rand_forest(mtry = tune(), min_n = tune(), trees = 100) %>%
+  set_engine("ranger", importance = "permutation") %>% 
+  set_mode("classification")
+
+nicotine_wflow <-
+  workflow() %>% 
+  add_model(rf_model) %>% 
+  add_recipe(nicotine_recipe)
+
+rf_grid <- grid_regular(
+  mtry(range = c(2, 8)), 
+  min_n(range = c(5, 20)), 
+  levels = 5
+)
+
+set.seed(123)
+rf_res <- tune_grid(
+  nicotine_wflow,
+  resamples = rf_folds,
+  grid = 10 
+)
+```
+
+```{r}
+rf_res %>%
+  collect_metrics() %>%
+  filter(.metric == "accuracy") %>%
+  select(mean, min_n, mtry) %>%
+  pivot_longer(min_n:mtry,
+    values_to = "value",
+    names_to = "parameter"
+  ) %>%
+  ggplot(aes(value, mean, color = parameter)) +
+  geom_point(show.legend = FALSE) +
+  facet_wrap(~parameter, scales = "free_x") +
+  labs(x = NULL, y = "Accuracy")
+```
+
+```{r}
+#Task 5
+
+nicotine_recipe_tr <- recipe(Nicotine ~., train) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+rf_model_tr <- rand_forest(mtry = tune(), min_n = tune(), trees = 100) %>%
+  set_engine("ranger", importance = "permutation") %>% 
+  set_mode("classification")
+
+nicotine_wflow_tr <-
+  workflow() %>% 
+  add_model(rf_model_tr) %>% 
+  add_recipe(nicotine_recipe_tr)
+
+rf_grid_tr <- grid_regular(
+  mtry(range = c(2, 8)), 
+  min_n(range = c(5, 20)),
+  levels = 5
+)
+
+set.seed(123)
+rf_res_tr <- tune_grid(
+  nicotine_wflow_tr,
+  resamples = rf_folds,
+  grid = 10 
+)
+```
+
+```{r}
+rf_res_tr %>%
+  collect_metrics() %>%
+  filter(.metric == "accuracy") %>%
+  select(mean, min_n, mtry) %>%
+  pivot_longer(min_n:mtry,
+    values_to = "value",
+    names_to = "parameter"
+  ) %>%
+  ggplot(aes(value, mean, color = parameter)) +
+  geom_point(show.legend = FALSE) +
+  facet_wrap(~parameter, scales = "free_x") +
+  labs(x = NULL, y = "Accuracy")
+```
+
+```{r}
+best_rf <- select_best(rf_res_tr, "accuracy")
+
+final_rf <- finalize_workflow(
+  nicotine_wflow_tr,
+  best_rf
+)
+
+final_rf
+```
+
+```{r}
+final_rf_fit <- fit(final_rf, train)
+```
+
+```{r}
+final_rf_fit %>% pull_workflow_fit() %>% vip(geom = "point")
+```
+
+The five most impactful variables are sensation seeing (SS), openness to experience (Oscore), being from the UK, within the age range of 45-54 and impulsiveness. 
+
+```{r}
+trainpredrf <- predict(final_rf_fit, train)
+head(trainpredrf)
+```
+
+```{r}
+confusionMatrix(trainpredrf$.pred_class, train$Nicotine, 
+                positive = "Yes")
+```
+
+```{r}
+testpredrf <- predict(final_rf_fit, test)
+head(testpredrf)
+
+```
+
+```{r}
+confusionMatrix(testpredrf$.pred_class, test$Nicotine, 
+                positive = "Yes")
+```
+
+Task 6 
+The training set performed much better than the test set with a 92% accuracy to the test set's 71%.I would not say the results are consistent.
+
+
+Task 7
+I think a good predictive model could have nonprofit or commercial treatment implications.  Based on the categorical data certain demographics could be targeted.  I would not recommend this model for use in its current form.  There's a substantial difference in the training and testing accuracy results.  The test set only shows a 4% (71%) improvement over the No Information Rate of 67%. The discrepancy between the training and testing datasets are too great and further testing or refinement conducted.
+  

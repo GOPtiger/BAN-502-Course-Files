@@ -1,0 +1,59 @@
+---
+output:
+  word_document: default
+  html_document: default
+---
+```{r}
+#install.packages("mice")
+#install.packages("VIM")
+#install.packages("naniar")
+
+library(naniar)
+library(tidyverse)
+library(mice) 
+library(VIM) 
+
+grades <- read_csv("class-grades.csv")
+
+```
+
+```{r}
+str(grades)
+summary(grades)
+```
+
+```{r}
+gg_miss_var(grades)
+
+
+```
+
+```{r}
+gg_miss_case(grades)
+```
+
+```{r}
+vim_plot = aggr(grades, numbers = TRUE, prop = c(TRUE, FALSE),cex.axis=.7)
+```
+
+```{r}
+grades_rowdel = grades %>% drop_na() 
+```
+
+```{r}
+grades_coldel = grades %>% select(-Tutorial, -Midterm, -TakeHome, -Final) 
+```
+
+```{r}
+set.seed(123) 
+grades_missing_fix = mice(grades, m=5, method='pmm', printFlag=FALSE)
+summary(grades_missing_fix)
+str(grades_missing_fix)
+```
+
+
+```{r}
+grades_complete = complete(grades_missing_fix)
+summary(grades_complete)
+```
+

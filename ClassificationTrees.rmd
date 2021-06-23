@@ -1,0 +1,225 @@
+---
+output:
+  word_document: default
+  html_document: default
+---
+```{r, include = FALSE}
+
+library(tidyverse)
+library(tidymodels)
+library(rpart)
+library(rpart.plot)
+library(RColorBrewer) 
+library(rattle)
+library(caret)
+
+parole <- read_csv("parole.csv")
+
+parole <- parole %>% mutate(male = as_factor(male)) %>%
+  mutate(male = fct_recode(male, "female" = "0", "male" = "1")) %>%
+  mutate(race = as_factor(race)) %>%
+  mutate(race = fct_recode(race, "otherwise" = "2", "white" = "1")) %>%
+  mutate(state = as_factor(state)) %>%
+  mutate(state = fct_recode(state, "Kentucky" = "2", "other" = "1", "Virginia" = "4", "Louisiana" = "3")) %>%
+  mutate(crime = as_factor(crime)) %>%
+  mutate(crime = fct_recode(crime, "larceny" = "2", "other" = "1", "driving related crime" = "4", "drug related crime" = "3")) %>%
+  mutate(multiple.offenses = as_factor(multiple.offenses)) %>%
+  mutate(multiple.offenses = fct_recode(multiple.offenses, "multiple offenses" = "1", "otherwise" = "0")) %>%
+  mutate(violator = as_factor(violator)) %>%
+  mutate(violator = fct_recode(violator, "violated parole" = "1", "parole complete without violation" = "0")) 
+
+```
+
+
+```{r Task 1}
+#Task 1
+set.seed(12345)
+parole_split <- initial_split(parole, prop = 0.70, strata = violator)
+train <- training(parole_split)
+test <- testing(parole_split)
+
+
+```
+
+```{r Task 2}
+#Task 2
+parole_recipe = recipe(violator ~., train) %>%
+  step_dummy(all_nominal(),-all_outcomes())
+
+tree_model = decision_tree() %>% 
+  set_engine("rpart", model = TRUE) %>%
+  set_mode("classification")
+
+parole_wflow = 
+  workflow() %>% 
+  add_model(tree_model) %>% 
+  add_recipe(parole_recipe)
+
+parole_fit = fit(parole_wflow, train)
+```
+
+```{r}
+tree = parole_fit %>% 
+  pull_workflow_fit() %>% 
+  pluck("fit")
+#rpart.plot(tree, tweak =1.5)
+fancyRpartPlot(tree, tweak=1.4)
+```
+
+Task 3
+A parolee from Louisana would 59% likelihood to complete parole without violation.  The parole who served 5 years would be 57% likely to complete parole without incident while if over 40 years old be 46% likely to violate parole.  Multiple offenses were not a significant factor for a Louisiana parolee in this tree.
+
+
+```{r Task 4}
+#Task 4
+parole_fit$fit$fit$fit$cptable
+```
+
+The xerror corresponding to the optimal cp is 1.314815 and is associated with 8 splits.  Yes, the tree in Task 2 is associated with this optimal cp.
+
+```{r Task 5}
+#Task 5
+set.seed(123)
+folds = vfold_cv(train, v = 5)
+
+parole2_recipe = recipe(violator ~., train) %>%
+  step_dummy(all_nominal(),-all_outcomes())
+
+tree_model = decision_tree(cost_complexity = tune()) %>% 
+  set_engine("rpart", model = TRUE) %>% 
+  set_mode("classification")
+
+tree_grid = grid_regular(cost_complexity(),
+                          levels = 25) 
+
+parole2_wflow = 
+  workflow() %>% 
+  add_model(tree_model) %>% 
+  add_recipe(parole2_recipe)
+
+tree_res = 
+  parole2_wflow %>% 
+  tune_grid(
+    resamples = folds,
+    grid = tree_grid
+    )
+
+tree_res
+
+```
+
+```{r}
+tree_res %>%
+  collect_metrics() %>%
+  ggplot(aes(cost_complexity, mean)) +
+  geom_line(size = 1.5, alpha = 0.6) +
+  geom_point(size = 2) +
+  facet_wrap(~ .metric, scales = "free", nrow = 2)
+```
+
+```{r}
+best_tree = tree_res %>%
+  select_best("accuracy")
+
+best_tree
+```
+
+```{r}
+final_wf = 
+  parole2_wflow %>% 
+  finalize_workflow(best_tree)
+```
+
+```{r}
+final_fit = fit(final_wf, train)
+
+tree = final_fit %>% 
+  pull_workflow_fit() %>% 
+  pluck("fit")
+
+#fancyRpartPlot(tree, tweak = 1.5) 
+```
+
+```{r}
+treepred = predict(final_fit, train, type = "class")
+head(treepred)
+```
+
+```{r}
+confusionMatrix(treepred$.pred_class,train$violator,positive="parole complete without violation")
+```
+
+```{r}
+treepred_test = predict(final_fit, test, type = "class")
+head(treepred_test)
+```
+
+```{r}
+confusionMatrix(treepred_test$.pred_class,test$violator,positive="parole complete without violation")
+```
+
+```{r}
+parole3_recipe = recipe(violator ~., train) %>% 
+  step_dummy(all_nominal(),-all_outcomes())
+
+tree_model = decision_tree(cost_complexity = tune()) %>% 
+  set_engine("rpart", model = TRUE) %>% 
+  set_mode("classification")
+
+tree_grid = expand.grid(cost_complexity = seq(0.001,0.01,by=0.001))
+
+parole3_wflow = 
+  workflow() %>% 
+  add_model(tree_model) %>% 
+  add_recipe(parole3_recipe)
+
+tree_res = 
+  parole3_wflow %>% 
+  tune_grid(
+    resamples = folds,
+    grid = tree_grid
+    )
+
+tree_res
+```
+
+```{r}
+tree_res %>%
+  collect_metrics() %>%
+  ggplot(aes(cost_complexity, mean)) +
+  geom_line(size = 1.5, alpha = 0.6) +
+  geom_point(size = 2) +
+  facet_wrap(~ .metric, scales = "free", nrow = 2) 
+```
+
+```{r}
+best_tree = tree_res %>%
+  select_best("accuracy")
+
+best_tree
+```
+
+```{r}
+final_wf = 
+  parole3_wflow %>% 
+  finalize_workflow(best_tree)
+```
+
+```{r Task 6 and 7}
+#Task 6 and 7 
+final_fit = fit(final_wf, train)
+
+tree = final_fit %>% 
+  pull_workflow_fit() %>% 
+  pluck("fit")
+
+final_fit$fit$fit$fit$cptable
+
+fancyRpartPlot(tree, tweak = 1.5) 
+```
+
+```{r}
+final_fit$fit$fit$fit$cptable
+```
+
+The optimal cp value is 8
